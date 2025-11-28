@@ -1,0 +1,23 @@
+[
+  {
+    "userId": 5511674216,
+    "categoria": "mercado",
+    "valor": 230.5,
+    "descricao": "compra do mês",
+    "data": "2025-11-27T23:03:20.520Z"
+  },
+  {
+    "userId": 5511674216,
+    "categoria": "mercado",
+    "valor": 300,
+    "descricao": "compras",
+    "data": "2025-11-27T23:27:30.856Z"
+  },
+  {
+    "userId": 5511674216,
+    "categoria": "lanche",
+    "valor": 250,
+    "descricao": "pastel",
+    "data": "2025-11-27T23:27:35.843Z"
+  }
+]

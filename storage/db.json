@@ -1,0 +1,39 @@
+{
+  "gastos": [
+    {
+      "id": 1764195723613,
+      "userId": 5511674216,
+      "categoria": "comida",
+      "valor": 12.5,
+      "descricao": "hamburguer",
+      "data": "2025-11-26T22:22:03.613Z"
+    },
+    {
+      "id": 1764196236436,
+      "userId": 5511674216,
+      "categoria": "lanche",
+      "valor": 10,
+      "descricao": "coxinha",
+      "data": "2025-11-26T22:30:36.437Z"
+    },
+    {
+      "id": 1764196244652,
+      "userId": 5511674216,
+      "categoria": "mercado",
+      "valor": 55.2,
+      "descricao": "carne",
+      "data": "2025-11-26T22:30:44.652Z"
+    },
+    {
+      "id": 1764284332684,
+      "userId": {
+        "userId": 5511674216,
+        "categoria": "mercado",
+        "valor": 230.5,
+        "descricao": "compra do mês",
+        "data": "2025-11-27T22:58:52.684Z"
+      },
+      "data": "2025-11-27T22:58:52.684Z"
+    }
+  ]
+}
