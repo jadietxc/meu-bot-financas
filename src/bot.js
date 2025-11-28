@@ -1,15 +1,17 @@
-const fs = require("fs");
-const path = require("path");
 const TelegramBot = require("node-telegram-bot-api");
 const { TELEGRAM_TOKEN } = require("../config/env");
-const { registrarGasto, listarPorData } = require("./services/gastosService");
-const { definirMetaMensal, obterMetaMensal } = require("./services/metasService");
-
-// pasta para exportação
-const EXPORT_DIR = path.join(__dirname, "..", "storage");
-if (!fs.existsSync(EXPORT_DIR)) {
-  fs.mkdirSync(EXPORT_DIR, { recursive: true });
-}
+const {
+  registrarGasto,
+  listarPorData,
+  listarPorUsuario,
+  removerGasto,
+  atualizarGasto,
+  resetUsuario,
+} = require("./services/gastosService");
+const {
+  definirMetaMensal,
+  obterMetaMensal,
+} = require("./services/metasService");
 
 // Inicializa o bot
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -19,19 +21,23 @@ const helpMessage = `
 Aqui estão os comandos disponíveis:
 
 /start   - Vamos Começar!
-/gasto   - Cuidado pra não passar do seu orçamento.
-/hoje    - Gastei muito ou pouco hoje?
-/semana  - Como foi essa semana?
-/mes     - Será um mês de poucas contas ou muitos pagamentos?
-/ano     - Como estou no ano?
+/gasto   - Registrar um gasto.
+/listar  - Listar seus últimos gastos com ID.
+/del <id> - Remover um gasto pelo ID.
+/edit <id> <campo> <novo valor> (campos: valor, categoria, descricao)
+/reset  - Apagar TODOS os seus gastos (com confirmação).
+
+/hoje    - Resumo de hoje.
+/semana  - Resumo da semana.
+/mes     - Resumo do mês.
+/ano     - Resumo do ano.
 /meta    - Definir ou ver a meta mensal.
-/grafico <periodo> - Gráfico de pizza por categoria (hoje, semana, mes, ano).
-/exportar - Exportar todos os seus gastos em CSV.
-/help    - ALGUÉM TIRAR O CARTÃO E O PIX DAS MINHAS MÃOS!!
+/grafico <periodo> - Gráfico de pizza (hoje, semana, mes, ano).
+/exportar - Exportar seus gastos em CSV.
+/help    - Ver todos os comandos.
 `;
 
-// Faz o parse dos argumentos do /gasto
-// /gasto <categoria> <valor> <descricao opcional>
+// Parse do /gasto
 function parseMensagemGasto(texto) {
   const partes = texto.trim().split(/\s+/);
 
@@ -133,7 +139,7 @@ function agruparPorCategoria(gastos) {
   return { labels, valores };
 }
 
-// Geração de URL de gráfico de pizza (QuickChart)
+// Gráfico de pizza
 function gerarUrlGraficoPizza(labels, valores, titulo) {
   const config = {
     type: "pie",
@@ -162,7 +168,7 @@ function gerarUrlGraficoPizza(labels, valores, titulo) {
   return `https://quickchart.io/chart?c=${encoded}`;
 }
 
-// Helpers para exportar CSV
+// Helpers CSV
 function escapeCsv(valor) {
   if (valor === null || valor === undefined) return "";
   const str = String(valor).replace(/"/g, '""');
@@ -174,14 +180,17 @@ function escapeCsv(valor) {
 
 function gerarCsvGastos(gastos) {
   const linhas = [];
-  linhas.push("data,categoria,valor,descricao");
+  linhas.push("id,data,categoria,valor,descricao");
 
   gastos.forEach((g) => {
     const dataIso = new Date(g.data).toISOString();
+    const valorNumero = Number(g.valor) || 0;
+
     const linha = [
+      escapeCsv(g.id ?? ""),
       escapeCsv(dataIso),
       escapeCsv(g.categoria),
-      escapeCsv(g.valor.toFixed(2)),
+      escapeCsv(valorNumero.toFixed(2)),
       escapeCsv(g.descricao || ""),
     ].join(",");
     linhas.push(linha);
@@ -199,13 +208,18 @@ Olá, estou aqui pra lhe ajudar a organizar suas finanças e controlar seus gast
 
 Use:
 /gasto   para registrar um gasto,
+/listar  para ver seus gastos com ID,
+/del <id> para remover um gasto,
+/edit <id> <campo> <novo valor> para editar,
+/reset  para apagar todos os seus gastos,
+
 /hoje    para ver o total de hoje,
 /semana  para ver o resumo da semana,
 /mes     para ver o resumo do mês,
 /ano     para ver o resumo do ano,
 /meta    para definir sua meta mensal,
-/grafico <periodo> para ver um gráfico de pizza (hoje, semana, mes, ano),
-/exportar para baixar seus gastos em CSV,
+/grafico <periodo> para ver um gráfico,
+/exportar para baixar seus gastos em CSV.
 /help    para ver todos os comandos.
 `;
 
@@ -282,7 +296,7 @@ bot.onText(/\/gasto(?:\s+(.+))?/, async (msg, match) => {
 
   const { categoria, valor, descricao } = resultado;
 
-  registrarGasto({
+  const novoGasto = registrarGasto({
     userId,
     categoria,
     valor,
@@ -290,7 +304,9 @@ bot.onText(/\/gasto(?:\s+(.+))?/, async (msg, match) => {
     data: new Date(),
   });
 
-  let resposta = `Gasto registrado: R$${valor.toFixed(2)} em ${categoria}`;
+  let resposta = `Gasto registrado [ID ${novoGasto.id}]: R$${valor.toFixed(
+    2
+  )} em ${categoria}`;
   if (descricao) {
     resposta += ` (${descricao})`;
   }
@@ -322,6 +338,179 @@ bot.onText(/\/gasto(?:\s+(.+))?/, async (msg, match) => {
   }
 });
 
+// /listar - últimos gastos com ID
+bot.onText(/\/listar/, (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  const gastos = listarPorUsuario(userId);
+
+  if (gastos.length === 0) {
+    bot.sendMessage(chatId, "Você ainda não tem gastos registrados.");
+    return;
+  }
+
+  const ordenados = [...gastos].sort(
+    (a, b) => new Date(b.data) - new Date(a.data)
+  );
+
+  const recentes = ordenados.slice(0, 20);
+
+  let texto = "🧾 Seus últimos gastos:\n\n";
+
+  recentes.forEach((g) => {
+    const d = new Date(g.data);
+    const dataFmt = d.toLocaleDateString("pt-BR");
+    texto += `[${g.id}] ${dataFmt} - ${g.categoria} - R$${g.valor.toFixed(
+      2
+    )}`;
+    if (g.descricao) {
+      texto += ` (${g.descricao})`;
+    }
+    texto += "\n";
+  });
+
+  texto +=
+    "\nUse /del <id> para remover um gasto ou /edit <id> <campo> <novo valor>.";
+
+  bot.sendMessage(chatId, texto);
+});
+
+// /del <id> - remover gasto
+bot.onText(/\/del(?:\s+(\d+))?/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const idStr = match[1];
+
+  if (!idStr) {
+    bot.sendMessage(
+      chatId,
+      "Uso correto: /del <id>\nExemplo: /del 12\nUse /listar para ver os IDs."
+    );
+    return;
+  }
+
+  const id = parseInt(idStr, 10);
+  if (Number.isNaN(id)) {
+    bot.sendMessage(chatId, "ID inválido. Use um número. Ex: /del 5");
+    return;
+  }
+
+  const ok = removerGasto(userId, id);
+
+  if (!ok) {
+    bot.sendMessage(
+      chatId,
+      `Não encontrei nenhum gasto seu com ID ${id}. Use /listar para conferir.`
+    );
+    return;
+  }
+
+  bot.sendMessage(chatId, `Gasto com ID ${id} removido com sucesso.`);
+});
+
+// /edit <id> <campo> <novo valor>
+bot.onText(/\/edit(?:\s+(.+))?/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const args = match[1];
+
+  if (!args) {
+    bot.sendMessage(
+      chatId,
+      "Uso correto: /edit <id> <campo> <novo valor>\nCampos: valor, categoria, descricao\nExemplos:\n/edit 10 valor 150.90\n/edit 10 categoria mercado\n/edit 10 descricao compra corrigida"
+    );
+    return;
+  }
+
+  const partes = args.trim().split(/\s+/);
+
+  if (partes.length < 3) {
+    bot.sendMessage(
+      chatId,
+      "Formato incorreto. Use: /edit <id> <campo> <novo valor>"
+    );
+    return;
+  }
+
+  const id = parseInt(partes[0], 10);
+  const campo = partes[1].toLowerCase();
+  const novoValorBruto = partes.slice(2).join(" ");
+
+  if (Number.isNaN(id)) {
+    bot.sendMessage(chatId, "ID inválido. Exemplo: /edit 5 valor 120.50");
+    return;
+  }
+
+  const updates = {};
+
+  if (campo === "valor") {
+    const num = parseFloat(novoValorBruto.replace(",", "."));
+    if (isNaN(num) || num <= 0) {
+      bot.sendMessage(
+        chatId,
+        "Valor inválido. Use número maior que zero. Ex: /edit 5 valor 99.90"
+      );
+      return;
+    }
+    updates.valor = num;
+  } else if (campo === "categoria") {
+    updates.categoria = novoValorBruto;
+  } else if (campo === "descricao") {
+    updates.descricao = novoValorBruto;
+  } else {
+    bot.sendMessage(
+      chatId,
+      "Campo inválido. Use: valor, categoria ou descricao.\nEx: /edit 3 descricao comprei errado"
+    );
+    return;
+  }
+
+  const atualizado = atualizarGasto(userId, id, updates);
+
+  if (!atualizado) {
+    bot.sendMessage(
+      chatId,
+      `Não encontrei nenhum gasto seu com ID ${id}. Use /listar para conferir.`
+    );
+    return;
+  }
+
+  bot.sendMessage(
+    chatId,
+    `Gasto ${id} atualizado:\nCategoria: ${atualizado.categoria}\nValor: R$${atualizado.valor.toFixed(
+      2
+    )}\nDescrição: ${atualizado.descricao || "(sem descrição)"}`
+  );
+});
+
+// /reset - pede confirmação
+bot.onText(/\/reset$/, (msg) => {
+  const chatId = msg.chat.id;
+
+  bot.sendMessage(
+    chatId,
+    "⚠ Isso vai apagar TODOS os seus gastos neste bot.\nSe tiver certeza, envie: /reset_confirmar"
+  );
+});
+
+// /reset_confirmar - apaga tudo do usuário
+bot.onText(/\/reset_confirmar/, (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  const removidos = resetUsuario(userId);
+
+  if (!removidos) {
+    bot.sendMessage(chatId, "Você não tinha gastos para apagar.");
+  } else {
+    bot.sendMessage(
+      chatId,
+      `Pronto. Apaguei ${removidos} gastos seus. Começando do zero.`
+    );
+  }
+});
+
 // /hoje
 bot.onText(/\/hoje/, (msg) => {
   const chatId = msg.chat.id;
@@ -335,10 +524,12 @@ bot.onText(/\/hoje/, (msg) => {
   }
 
   const total = gastos.reduce((acc, g) => acc + g.valor, 0);
-  let resumo = `📅 Resumo de hoje:\nTotal: R$${total.toFixed(2)}\n\nDetalhes:\n`;
+  let resumo = `📅 Resumo de hoje:\nTotal: R$${total.toFixed(
+    2
+  )}\n\nDetalhes:\n`;
 
   gastos.forEach((g) => {
-    resumo += `• ${g.categoria} - R$${g.valor.toFixed(2)}${
+    resumo += `• [${g.id}] ${g.categoria} - R$${g.valor.toFixed(2)}${
       g.descricao ? " (" + g.descricao + ")" : ""
     }\n`;
   });
@@ -366,7 +557,9 @@ bot.onText(/\/semana/, (msg) => {
     categorias[g.categoria] += g.valor;
   });
 
-  let resumo = `📆 Resumo da semana:\nTotal: R$${total.toFixed(2)}\n\nPor categoria:\n`;
+  let resumo = `📆 Resumo da semana:\nTotal: R$${total.toFixed(
+    2
+  )}\n\nPor categoria:\n`;
 
   Object.keys(categorias).forEach((cat) => {
     resumo += `• ${cat}: R$${categorias[cat].toFixed(2)}\n`;
@@ -395,7 +588,9 @@ bot.onText(/\/mes/, (msg) => {
     categorias[g.categoria] += g.valor;
   });
 
-  let resumo = `📆 Resumo do mês:\nTotal: R$${total.toFixed(2)}\n\nPor categoria:\n`;
+  let resumo = `📆 Resumo do mês:\nTotal: R$${total.toFixed(
+    2
+  )}\n\nPor categoria:\n`;
 
   Object.keys(categorias).forEach((cat) => {
     resumo += `• ${cat}: R$${categorias[cat].toFixed(2)}\n`;
@@ -424,7 +619,9 @@ bot.onText(/\/ano/, (msg) => {
     categorias[g.categoria] += g.valor;
   });
 
-  let resumo = `📆 Resumo do ano:\nTotal: R$${total.toFixed(2)}\n\nPor categoria:\n`;
+  let resumo = `📆 Resumo do ano:\nTotal: R$${total.toFixed(
+    2
+  )}\n\nPor categoria:\n`;
 
   Object.keys(categorias).forEach((cat) => {
     resumo += `• ${cat}: R$${categorias[cat].toFixed(2)}\n`;
@@ -474,12 +671,12 @@ bot.onText(/\/grafico(?:\s+(\w+))?/, async (msg, match) => {
   });
 });
 
-// /exportar - todos os gastos do usuário em CSV
+// /exportar
 bot.onText(/\/exportar/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
-  const todos = listarPorData().filter((g) => g.userId === userId);
+  const todos = listarPorUsuario(userId);
 
   if (todos.length === 0) {
     bot.sendMessage(
@@ -490,10 +687,11 @@ bot.onText(/\/exportar/, async (msg) => {
   }
 
   const csv = gerarCsvGastos(todos);
-  const filePath = path.join(EXPORT_DIR, `gastos-${userId}.csv`);
-  fs.writeFileSync(filePath, csv, "utf-8");
+  const buffer = Buffer.from(csv, "utf-8");
 
-  await bot.sendDocument(chatId, filePath, {
+  await bot.sendDocument(chatId, buffer, {
     caption: "Aqui estão seus gastos em CSV.",
+    filename: "gastos.csv",
+    contentType: "text/csv",
   });
 });
