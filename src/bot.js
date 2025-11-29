@@ -1,5 +1,7 @@
 const TelegramBot = require("node-telegram-bot-api");
 const { TELEGRAM_TOKEN } = require("../config/env");
+
+// Serviços de gastos
 const {
   registrarGasto,
   listarPorData,
@@ -8,10 +10,16 @@ const {
   atualizarGasto,
   resetUsuario,
 } = require("./services/gastosService");
+
+// Serviços de metas
 const {
   definirMetaMensal,
   obterMetaMensal,
 } = require("./services/metasService");
+
+// Serviços de salário
+const { definirSalario, obterSalario } = require("./services/salarioService");
+
 
 // Inicializa o bot
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -672,13 +680,13 @@ bot.onText(/\/grafico(?:\s+(\w+))?/, async (msg, match) => {
 });
 
 // /exportar
-bot.onText(/\/exportar/, async (msg) => {
+bot.onText(/\/exportar/i, async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
-  const todos = listarPorUsuario(userId);
+  const todos = await Promise.resolve(listarPorUsuario(userId));
 
-  if (todos.length === 0) {
+  if (!todos || todos.length === 0) {
     bot.sendMessage(
       chatId,
       "Você ainda não tem gastos registrados para exportar."
@@ -689,9 +697,75 @@ bot.onText(/\/exportar/, async (msg) => {
   const csv = gerarCsvGastos(todos);
   const buffer = Buffer.from(csv, "utf-8");
 
-  await bot.sendDocument(chatId, buffer, {
-    caption: "Aqui estão seus gastos em CSV.",
-    filename: "gastos.csv",
-    contentType: "text/csv",
-  });
+  await bot.sendDocument(
+    chatId,
+    buffer,
+    { caption: "Aqui estão seus gastos em CSV." },         // opções da mensagem
+    { filename: "gastos.csv", contentType: "text/csv" }     // opções do arquivo
+  );
 });
+
+
+// /salario [valor]
+bot.onText(/\/salario(?:\s+(.+))?/i, (msg, match) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const arg = match[1];
+
+  if (!arg) {
+    const atual = obterSalario(userId);
+    if (!atual) {
+      return bot.sendMessage(
+        chatId,
+        "Você ainda não definiu salário. Use:\n/salario <valor>\nExemplo: /salario 2500"
+      );
+    }
+    return bot.sendMessage(chatId, `💰 Seu salário atual é: R$${Number(atual).toFixed(2)}`);
+  }
+
+  const valor = parseFloat(String(arg).replace(",", "."));
+  if (isNaN(valor) || valor <= 0) {
+    return bot.sendMessage(chatId, "Valor inválido. Use número maior que 0.\nEx: /salario 2500");
+  }
+
+  definirSalario(userId, valor);
+  return bot.sendMessage(chatId, `📌 Salário definido com sucesso: R$${valor.toFixed(2)}`);
+});
+
+// /saldo - mostra salário, gastos do mês e saldo disponível
+bot.onText(/\/saldo/i, (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  const salario = obterSalario(userId);
+  if (!salario) {
+    return bot.sendMessage(
+      chatId,
+      "Você não definiu o salário ainda. Use:\n/salario <valor>"
+    );
+  }
+
+  // pega gastos do mês atual (usa listarPorData ou listarPorUsuario já existentes)
+  const todos = listarPorUsuario ? listarPorUsuario(userId) : (listarPorData() || []);
+  const agora = new Date();
+  const mesAtual = agora.getMonth();
+  const anoAtual = agora.getFullYear();
+
+  const gastosMes = (Array.isArray(todos) ? todos : [])
+    .filter((g) => {
+      if (!g || g.userId !== userId) return false;
+      const d = new Date(g.data);
+      return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
+    });
+
+  const total = gastosMes.reduce((acc, g) => acc + (Number(g.valor) || 0), 0);
+  const saldo = Number(salario) - total;
+
+  let texto = `💰 Salário: R$${Number(salario).toFixed(2)}\n`;
+  texto += `💸 Gastos do mês: R$${total.toFixed(2)}\n`;
+  texto += `📍 Saldo disponível: R$${saldo.toFixed(2)}\n\n`;
+  texto += `Detalhe: ${gastosMes.length} gasto(s) contabilizado(s) neste mês. Use /listar para ver IDs.`;
+
+  return bot.sendMessage(chatId, texto);
+});
+

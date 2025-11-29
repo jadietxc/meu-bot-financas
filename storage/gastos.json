@@ -2,22 +2,33 @@
   {
     "userId": 5511674216,
     "categoria": "mercado",
-    "valor": 230.5,
+    "valor": 25,
     "descricao": "compra do mês",
-    "data": "2025-11-27T23:03:20.520Z"
+    "data": "2025-11-27T23:03:20.520Z",
+    "id": 1
   },
   {
     "userId": 5511674216,
     "categoria": "mercado",
     "valor": 300,
     "descricao": "compras",
-    "data": "2025-11-27T23:27:30.856Z"
+    "data": "2025-11-27T23:27:30.856Z",
+    "id": 2
   },
   {
     "userId": 5511674216,
     "categoria": "lanche",
     "valor": 250,
     "descricao": "pastel",
-    "data": "2025-11-27T23:27:35.843Z"
+    "data": "2025-11-27T23:27:35.843Z",
+    "id": 3
+  },
+  {
+    "id": 4,
+    "userId": 5511674216,
+    "categoria": "mercado",
+    "valor": 200,
+    "descricao": "compras",
+    "data": "2025-11-29T00:42:33.780Z"
   }
 ]
